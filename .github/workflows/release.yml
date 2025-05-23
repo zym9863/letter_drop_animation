@@ -6,6 +6,10 @@ on:
       - 'v*.*.*'  # 触发条件：推送版本标签，如 v1.0.0
   workflow_dispatch:  # 允许手动触发
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build-and-release:
     runs-on: windows-latest
@@ -72,7 +76,7 @@ jobs:
       shell: powershell
 
     - name: 创建GitHub Release并上传文件
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.get_version.outputs.VERSION }}
         name: ${{ steps.get_version.outputs.APP_NAME }} ${{ steps.get_version.outputs.VERSION }}
@@ -109,5 +113,3 @@ jobs:
           letter_drop_animation-x86_64.apk
         draft: false
         prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
