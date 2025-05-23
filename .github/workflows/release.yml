@@ -1,0 +1,110 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 触发条件：推送版本标签，如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Java环境
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+
+    - name: 设置Flutter环境
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+
+    - name: 获取Flutter依赖
+      run: flutter pub get
+
+    - name: 运行测试
+      run: flutter test
+
+    - name: 构建Windows应用
+      run: |
+        flutter config --enable-windows-desktop
+        flutter build windows --release
+
+    - name: 构建Android APK
+      run: flutter build apk --release
+
+    - name: 准备发布文件
+      run: |
+        # 创建发布目录
+        mkdir release-files
+
+        # 复制Windows exe文件
+        Copy-Item "build\windows\x64\runner\Release\*" -Destination "release-files\" -Recurse
+
+        # 重命名Windows应用文件夹
+        Rename-Item "release-files" "letter_drop_animation_windows"
+
+        # 压缩Windows应用
+        Compress-Archive -Path "letter_drop_animation_windows" -DestinationPath "letter_drop_animation_windows.zip"
+
+        # 复制Android APK
+        Copy-Item "build\app\outputs\flutter-apk\app-release.apk" -Destination "letter_drop_animation.apk"
+      shell: powershell
+
+    - name: 获取版本信息
+      id: get_version
+      run: |
+        $version = $env:GITHUB_REF -replace 'refs/tags/', ''
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+        # 从pubspec.yaml获取应用名称和描述
+        $pubspec = Get-Content pubspec.yaml
+        $name = ($pubspec | Select-String "name: (.+)").Matches[0].Groups[1].Value
+        $description = ($pubspec | Select-String "description: (.+)").Matches[0].Groups[1].Value
+        echo "APP_NAME=$name" >> $env:GITHUB_OUTPUT
+        echo "APP_DESCRIPTION=$description" >> $env:GITHUB_OUTPUT
+      shell: powershell
+
+    - name: 创建GitHub Release并上传文件
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_version.outputs.VERSION }}
+        name: ${{ steps.get_version.outputs.APP_NAME }} ${{ steps.get_version.outputs.VERSION }}
+        body: |
+          ## 🎉 ${{ steps.get_version.outputs.APP_NAME }} ${{ steps.get_version.outputs.VERSION }}
+
+          ### 📱 下载
+          - **Windows**: 下载 `letter_drop_animation_windows.zip` 并解压运行
+          - **Android**: 下载 `letter_drop_animation.apk` 并安装
+
+          ### 📝 更新内容
+          - 新版本发布
+          - 性能优化和错误修复
+
+          ### 💻 系统要求
+          - **Windows**: Windows 10 或更高版本
+          - **Android**: Android 5.0 (API 21) 或更高版本
+
+          ### 🔧 技术栈
+          - Flutter 3.24.0
+          - Dart SDK ^3.7.0
+          - Flame游戏引擎
+          - Forge2D物理引擎
+
+          ---
+
+          ${{ steps.get_version.outputs.APP_DESCRIPTION }}
+        files: |
+          letter_drop_animation_windows.zip
+          letter_drop_animation.apk
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
