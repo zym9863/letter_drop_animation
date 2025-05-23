@@ -23,7 +23,7 @@ jobs:
     - name: 设置Flutter环境
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.24.0'
+        flutter-version: '3.32.0'
         channel: 'stable'
 
     - name: 获取Flutter依赖
@@ -93,7 +93,7 @@ jobs:
           - **Android**: Android 5.0 (API 21) 或更高版本
 
           ### 🔧 技术栈
-          - Flutter 3.24.0
+          - Flutter 3.32.0
           - Dart SDK ^3.7.0
           - Flame游戏引擎
           - Forge2D物理引擎
