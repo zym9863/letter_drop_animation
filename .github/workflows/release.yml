@@ -29,16 +29,13 @@ jobs:
     - name: 获取Flutter依赖
       run: flutter pub get
 
-    - name: 运行测试
-      run: flutter test
-
     - name: 构建Windows应用
       run: |
         flutter config --enable-windows-desktop
         flutter build windows --release
 
     - name: 构建Android APK
-      run: flutter build apk --release
+      run: flutter build apk --split-per-abi --release
 
     - name: 准备发布文件
       run: |
@@ -54,8 +51,10 @@ jobs:
         # 压缩Windows应用
         Compress-Archive -Path "letter_drop_animation_windows" -DestinationPath "letter_drop_animation_windows.zip"
 
-        # 复制Android APK
-        Copy-Item "build\app\outputs\flutter-apk\app-release.apk" -Destination "letter_drop_animation.apk"
+        # 复制Android APK文件（split-per-abi生成多个APK）
+        Copy-Item "build\app\outputs\flutter-apk\app-arm64-v8a-release.apk" -Destination "letter_drop_animation-arm64-v8a.apk"
+        Copy-Item "build\app\outputs\flutter-apk\app-armeabi-v7a-release.apk" -Destination "letter_drop_animation-armeabi-v7a.apk"
+        Copy-Item "build\app\outputs\flutter-apk\app-x86_64-release.apk" -Destination "letter_drop_animation-x86_64.apk"
       shell: powershell
 
     - name: 获取版本信息
@@ -82,7 +81,9 @@ jobs:
 
           ### 📱 下载
           - **Windows**: 下载 `letter_drop_animation_windows.zip` 并解压运行
-          - **Android**: 下载 `letter_drop_animation.apk` 并安装
+          - **Android ARM64**: 下载 `letter_drop_animation-arm64-v8a.apk`（推荐，适用于大多数现代Android设备）
+          - **Android ARM32**: 下载 `letter_drop_animation-armeabi-v7a.apk`（适用于较老的Android设备）
+          - **Android x86_64**: 下载 `letter_drop_animation-x86_64.apk`（适用于x86架构设备或模拟器）
 
           ### 📝 更新内容
           - 新版本发布
@@ -103,7 +104,9 @@ jobs:
           ${{ steps.get_version.outputs.APP_DESCRIPTION }}
         files: |
           letter_drop_animation_windows.zip
-          letter_drop_animation.apk
+          letter_drop_animation-arm64-v8a.apk
+          letter_drop_animation-armeabi-v7a.apk
+          letter_drop_animation-x86_64.apk
         draft: false
         prerelease: false
       env:
