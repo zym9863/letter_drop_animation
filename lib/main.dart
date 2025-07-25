@@ -3,7 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flame_forge2d/flame_forge2d.dart';
 import 'package:flame/game.dart';
+import 'package:flame/events.dart';
 import 'letter_physics.dart';
+import 'background_effects.dart';
+import 'animated_app_bar.dart';
+import 'control_panel.dart';
+import 'particle_effects.dart';
+import 'performance_manager.dart';
 
 void main() {
   runApp(const ProviderScope(child: MyApp()));
@@ -34,36 +40,110 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class LetterDropPage extends StatelessWidget {
+class LetterDropPage extends StatefulWidget {
   const LetterDropPage({super.key});
+
+  @override
+  State<LetterDropPage> createState() => _LetterDropPageState();
+}
+
+class _LetterDropPageState extends State<LetterDropPage> {
+  late GameWorld _gameWorld;
+  bool _isPlaying = true;
+  double _dropSpeed = 1.0;
+  bool _soundEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _gameWorld = GameWorld();
+  }
+
+  void _togglePlayPause() {
+    setState(() {
+      _isPlaying = !_isPlaying;
+      if (_isPlaying) {
+        _gameWorld.resumeEngine();
+      } else {
+        _gameWorld.pauseEngine();
+      }
+    });
+  }
+
+  void _clearLetters() {
+    _gameWorld.clearAllLetters();
+  }
+
+  void _showSettings() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => SettingsDialog(
+        currentSpeed: _dropSpeed,
+        soundEnabled: _soundEnabled,
+        onSpeedChanged: (speed) {
+          setState(() {
+            _dropSpeed = speed;
+            _gameWorld.setDropSpeed(speed);
+          });
+        },
+        onSoundToggled: (enabled) {
+          setState(() {
+            _soundEnabled = enabled;
+            _gameWorld.setSoundEnabled(enabled);
+          });
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Letter Drop Animation'),
-        centerTitle: true,
+      appBar: const AnimatedAppBar(title: 'Letter Drop Animation'),
+      body: Column(
+        children: [
+          Expanded(
+            child: LetterDropWorld(
+              gameWorld: _gameWorld,
+              dropSpeed: _dropSpeed,
+              soundEnabled: _soundEnabled,
+            ),
+          ),
+          ControlPanel(
+            isPlaying: _isPlaying,
+            onPlayPause: _togglePlayPause,
+            onClear: _clearLetters,
+            onSettings: _showSettings,
+          ),
+        ],
       ),
-      body: const LetterDropWorld(),
     );
   }
 }
 
 class LetterDropWorld extends StatefulWidget {
-  const LetterDropWorld({super.key});
+  final GameWorld gameWorld;
+  final double dropSpeed;
+  final bool soundEnabled;
+  
+  const LetterDropWorld({
+    super.key,
+    required this.gameWorld,
+    required this.dropSpeed,
+    required this.soundEnabled,
+  });
 
   @override
   State<LetterDropWorld> createState() => _LetterDropWorldState();
 }
 
 class _LetterDropWorldState extends State<LetterDropWorld> {
-  late final GameWorld _gameWorld;
   async_dart.Timer? _letterGenerationTimer;
 
   @override
   void initState() {
     super.initState();
-    _gameWorld = GameWorld();
     _startLetterGeneration();
   }
 
@@ -75,34 +155,172 @@ class _LetterDropWorldState extends State<LetterDropWorld> {
 
   void _startLetterGeneration() {
     _letterGenerationTimer = async_dart.Timer.periodic(
-      const Duration(milliseconds: 500),
+      Duration(milliseconds: (500 / widget.dropSpeed).round()),
       (timer) {
-        if (mounted) {
-          final letter = LetterGenerator.generateLetter(_gameWorld.size.x);
-          _gameWorld.add(letter);
+        if (mounted && widget.gameWorld.isEngineRunning) {
+          final letter = LetterGenerator.generateLetter(widget.gameWorld.size.x);
+          widget.gameWorld.add(letter);
         }
       },
     );
   }
 
   @override
+  void didUpdateWidget(LetterDropWorld oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dropSpeed != widget.dropSpeed) {
+      _letterGenerationTimer?.cancel();
+      _startLetterGeneration();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF0A0A12),
-      child: GameWidget(game: _gameWorld),
+      child: GestureDetector(
+        onTapDown: (details) {
+          final renderBox = context.findRenderObject() as RenderBox;
+          final localPosition = renderBox.globalToLocal(details.globalPosition);
+          widget.gameWorld.handleTap(Vector2(localPosition.dx, localPosition.dy));
+        },
+        child: GameWidget(game: widget.gameWorld),
+      ),
     );
   }
 }
 
 class GameWorld extends Forge2DGame {
   static const double worldScale = 10.0;
+  late BackgroundEffect backgroundEffect;
+  bool isEngineRunning = true;
+  double dropSpeed = 1.0;
+  bool soundEnabled = true;
+  late PerformanceManager _performanceManager;
 
   GameWorld() : super(gravity: Vector2(0, 98.1), zoom: worldScale);
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
+    
+    // 初始化性能管理器
+    _performanceManager = PerformanceManager.instance;
+    _performanceManager.initialize();
+    
+    // 添加背景效果
+    backgroundEffect = BackgroundEffect();
+    add(backgroundEffect);
+    
     _addBoundaries();
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    _performanceManager.updateStats(dt);
+    
+    // 定期清理屏幕外的对象
+    _cleanupOffScreenObjects();
+  }
+
+  void _cleanupOffScreenObjects() {
+    final componentsToRemove = <BodyComponent>[];
+    
+    for (final component in children) {
+      if (component is LetterBody) {
+        if (component.body.position.y > size.y + 10) {
+          componentsToRemove.add(component);
+        }
+      } else if (component is ParticleExplosion) {
+        if (component.timeAlive > component.maxLifetime) {
+          componentsToRemove.add(component as BodyComponent);
+        }
+      }
+    }
+    
+    for (final component in componentsToRemove) {
+      remove(component);
+      if (component is LetterBody) {
+        _performanceManager.releaseLetter(component);
+      }
+    }
+  }
+
+  void handleTap(Vector2 position) {
+    final worldPosition = screenToWorld(position);
+    _handleTap(worldPosition);
+  }
+
+  void _handleTap(Vector2 position) {
+    // 寻找点击位置附近的字母
+    final tappedLetter = _findLetterAt(position);
+    
+    if (tappedLetter != null) {
+      // 字母被点击，创建特殊效果
+      _createTapEffect(tappedLetter);
+    } else {
+      // 空白区域被点击，创建涟漪效果
+      _createRippleEffect(position);
+    }
+  }
+
+  LetterBody? _findLetterAt(Vector2 position) {
+    const tapRadius = 3.0;
+    
+    for (final component in children) {
+      if (component is LetterBody) {
+        final distance = component.body.position.distanceTo(position);
+        if (distance <= tapRadius) {
+          return component;
+        }
+      }
+    }
+    return null;
+  }
+
+  void _createTapEffect(LetterBody letter) {
+    // 给字母施加向上的冲击力
+    final impulse = Vector2(0, -50);
+    letter.body.applyLinearImpulse(impulse);
+    
+    // 创建点击爆炸效果
+    final tapExplosion = ParticleExplosion(
+      position: letter.body.position,
+      baseColor: letter.color,
+    );
+    add(tapExplosion);
+    
+    // 创建冲击波
+    final shockWave = ShockWave(
+      center: letter.body.position,
+      color: letter.color,
+    );
+    add(shockWave);
+  }
+
+  void _createRippleEffect(Vector2 position) {
+    // 创建涟漪效果
+    final ripple = RippleEffect(
+      center: position,
+      color: const Color(0xFF00F3FF),
+    );
+    add(ripple);
+  }
+
+  void clearAllLetters() {
+    // 移除所有字母组件
+    children.whereType<LetterBody>().toList().forEach((letter) {
+      remove(letter);
+    });
+  }
+
+  void setDropSpeed(double speed) {
+    dropSpeed = speed;
+  }
+
+  void setSoundEnabled(bool enabled) {
+    soundEnabled = enabled;
   }
 
   void _addBoundaries() {
